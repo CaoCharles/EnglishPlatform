@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>English Practice - 英文會話練習</title>
+    <meta name="description"
+        content="Practice English conversation with AI-powered article analysis, translations, and text-to-speech.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1 class="logo">🎯 English Practice</h1>
+                <div class="header-actions">
+                    <button id="theme-toggle" class="btn-icon" title="Toggle Dark Mode">
+                        <span class="icon-light">🌙</span>
+                        <span class="icon-dark">☀️</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Input Section -->
+            <aside class="input-section">
+                <div class="section-card">
+                    <h2 class="section-title">📝 輸入文章</h2>
+
+                    <!-- Article Input -->
+                    <div class="form-group">
+                        <label for="article-input" class="form-label">📄 貼上文章內容</label>
+                        <textarea id="article-input" class="form-textarea" rows="12"
+                            placeholder="在此貼上英文文章內容..."></textarea>
+                        <div class="textarea-footer">
+                            <span id="word-count">0 字</span>
+                        </div>
+                    </div>
+
+                    <!-- URL Input -->
+                    <div class="form-group">
+                        <label for="url-input" class="form-label">🔗 或輸入網址</label>
+                        <div class="input-with-button">
+                            <input type="url" id="url-input" class="form-input"
+                                placeholder="https://example.com/article">
+                            <button id="fetch-url" class="btn-secondary" type="button">擷取</button>
+                        </div>
+                        <p class="form-hint">支援大部分新聞網站</p>
+                    </div>
+
+                    <!-- TTS Settings -->
+                    <div class="form-group">
+                        <label class="form-label">🔊 語音設定</label>
+                        <div class="settings-row">
+                            <label for="voice-select" class="settings-label">語音:</label>
+                            <select id="voice-select" class="form-select"></select>
+                        </div>
+                        <div class="settings-row">
+                            <label for="speech-rate" class="settings-label">語速:</label>
+                            <input type="range" id="speech-rate" class="form-range" min="0.5" max="2" step="0.1"
+                                value="1">
+                            <span id="rate-value">1x</span>
+                        </div>
+                    </div>
+
+                    <!-- Process Button -->
+                    <button id="process-btn" class="btn-primary btn-large">
+                        <span class="btn-text">🚀 處理文章</span>
+                        <span class="btn-loading">⏳ 處理中...</span>
+                    </button>
+                </div>
+            </aside>
+
+            <!-- Results Section -->
+            <section class="results-section">
+                <!-- Empty State -->
+                <div id="empty-state" class="empty-state">
+                    <div class="empty-icon">📚</div>
+                    <h3>開始學習英文</h3>
+                    <p>在左側輸入文章內容或網址，系統將自動分析並生成學習內容</p>
+                    <ul class="feature-list">
+                        <li>✨ 文章摘要與重點整理</li>
+                        <li>📖 智能分段與中文翻譯</li>
+                        <li>💡 簡單英文總結</li>
+                        <li>❓ 延伸問題練習</li>
+                        <li>🔊 語音朗讀功能</li>
+                    </ul>
+                </div>
+
+                <!-- Loading State -->
+                <div id="loading-state" class="loading-state hidden">
+                    <div class="loading-spinner"></div>
+                    <p id="loading-text">正在分析文章...</p>
+                </div>
+
+                <!-- Results Container -->
+                <div id="results-container" class="results-container hidden">
+                    <!-- Summary Card -->
+                    <div id="summary-card" class="result-card summary-card">
+                        <div class="card-header">
+                            <h3 class="card-title">📋 文章摘要</h3>
+                            <button class="btn-speak" data-target="summary-content" title="朗讀摘要">🔊</button>
+                        </div>
+                        <div id="summary-content" class="card-content">
+                            <!-- Summary will be inserted here -->
+                        </div>
+                    </div>
+
+                    <!-- Paragraphs Container -->
+                    <div id="paragraphs-container">
+                        <!-- Paragraph cards will be inserted here -->
+                    </div>
+                </div>
+
+                <!-- Error State -->
+                <div id="error-state" class="error-state hidden">
+                    <div class="error-icon">⚠️</div>
+                    <h3>發生錯誤</h3>
+                    <p id="error-message"></p>
+                    <button id="retry-btn" class="btn-secondary">重試</button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Built with ❤️ for English learners | Powered by Claude AI</p>
+        </footer>
+    </div>
+
+    <!-- Paragraph Card Template -->
+    <template id="paragraph-template">
+        <div class="result-card paragraph-card">
+            <div class="card-header">
+                <h3 class="card-title">📖 段落 <span class="paragraph-number"></span></h3>
+                <div class="card-actions">
+                    <button class="btn-speak" data-target="original" title="朗讀原文">🔊</button>
+                    <button class="btn-collapse" title="展開/收合">▼</button>
+                </div>
+            </div>
+
+            <div class="card-body">
+                <!-- Original Text -->
+                <div class="content-block">
+                    <div class="block-header">
+                        <span class="block-label">原文</span>
+                    </div>
+                    <p class="original-text"></p>
+                </div>
+
+                <!-- Translation -->
+                <div class="content-block translation-block">
+                    <div class="block-header">
+                        <span class="block-label">中文翻譯</span>
+                        <button class="btn-toggle-translation btn-text">👁 顯示翻譯</button>
+                    </div>
+                    <p class="translation-text hidden"></p>
+                </div>
+
+                <!-- Simple Summary -->
+                <div class="content-block summary-block">
+                    <div class="block-header">
+                        <span class="block-label">💡 簡單英文總結</span>
+                        <button class="btn-speak" data-target="simple-summary" title="朗讀總結">🔊</button>
+                    </div>
+                    <p class="simple-summary"></p>
+                    <div class="summary-translation-toggle">
+                        <button class="btn-toggle-summary-translation btn-text">👁 顯示中文</button>
+                    </div>
+                    <p class="summary-translation hidden"></p>
+                </div>
+
+                <!-- Questions -->
+                <div class="content-block questions-block">
+                    <div class="block-header">
+                        <span class="block-label">❓ 延伸問題</span>
+                    </div>
+                    <div class="questions-list">
+                        <!-- Questions will be inserted here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Question Template -->
+    <template id="question-template">
+        <div class="question-item">
+            <div class="question-header">
+                <span class="question-number"></span>
+                <p class="question-text"></p>
+                <button class="btn-speak" data-target="question" title="朗讀問題">🔊</button>
+            </div>
+            <div class="question-translation-toggle">
+                <button class="btn-toggle-question-translation btn-text">👁 顯示中文</button>
+            </div>
+            <p class="question-translation hidden"></p>
+
+            <div class="answer-section">
+                <button class="btn-show-answer btn-secondary">顯示答案</button>
+                <div class="answer-content hidden">
+                    <div class="answer-header">
+                        <span class="answer-label">💬 參考答案</span>
+                        <button class="btn-speak" data-target="answer" title="朗讀答案">🔊</button>
+                    </div>
+                    <p class="answer-text"></p>
+                    <div class="answer-translation-toggle">
+                        <button class="btn-toggle-answer-translation btn-text">👁 顯示中文</button>
+                    </div>
+                    <p class="answer-translation hidden"></p>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <script src="js/utils.js"></script>
+    <script src="js/tts.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>
