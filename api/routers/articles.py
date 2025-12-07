@@ -107,6 +107,72 @@ def split_into_paragraphs(article: str) -> list[str]:
     return result if result else [article]
 
 
+def try_fix_json(json_str: str) -> str:
+    """Try to fix common JSON issues"""
+    # Remove any trailing incomplete content after the last complete brace
+    # Find the last complete JSON structure
+    brace_count = 0
+    last_complete_pos = 0
+    
+    for i, char in enumerate(json_str):
+        if char == '{':
+            brace_count += 1
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                last_complete_pos = i + 1
+    
+    if last_complete_pos > 0:
+        json_str = json_str[:last_complete_pos]
+    
+    # Try to close any unclosed strings or brackets
+    # Count quotes
+    quote_count = json_str.count('"') - json_str.count('\\"')
+    if quote_count % 2 == 1:
+        # Unclosed string, try to close it
+        json_str = json_str.rstrip()
+        if not json_str.endswith('"'):
+            json_str += '"'
+    
+    return json_str
+
+
+def parse_json_safely(response_text: str) -> dict:
+    """Parse JSON with multiple fallback strategies"""
+    # Clean up the response
+    response_text = response_text.strip()
+    
+    # Remove markdown code blocks if present
+    if response_text.startswith('```'):
+        response_text = re.sub(r'^```json?\n?', '', response_text)
+        response_text = re.sub(r'```\n?$', '', response_text)
+        response_text = response_text.strip()
+    
+    # Try direct parsing first
+    try:
+        return json.loads(response_text)
+    except json.JSONDecodeError:
+        pass
+    
+    # Try to fix and parse
+    try:
+        fixed = try_fix_json(response_text)
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+    
+    # Try to extract JSON object using regex
+    try:
+        # Find the outermost JSON object
+        match = re.search(r'\{[\s\S]*\}', response_text)
+        if match:
+            return json.loads(match.group())
+    except json.JSONDecodeError:
+        pass
+    
+    raise ValueError(f"Cannot parse JSON response: {response_text[:200]}...")
+
+
 # API Endpoints
 @router.post("/fetch-url", response_model=FetchURLResponse)
 async def fetch_url(request: FetchURLRequest):
@@ -173,6 +239,11 @@ async def generate_summary(request: GenerateSummaryRequest):
     client = get_claude_client()
     model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
     
+    # Truncate article if too long (to avoid token limits)
+    article = request.article
+    if len(article) > 8000:
+        article = article[:8000] + "\n\n[Article truncated for processing...]"
+    
     try:
         message = client.messages.create(
             model=model,
@@ -185,7 +256,7 @@ async def generate_summary(request: GenerateSummaryRequest):
 Format your response as a bullet point list, with each point being 1-2 sentences.
 
 Article:
-{request.article}
+{article}
 
 Respond with ONLY the bullet points, no additional text."""
             }]
@@ -203,74 +274,90 @@ async def generate_paragraph_content(request: GenerateParagraphRequest):
     client = get_claude_client()
     model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
     
-    try:
-        message = client.messages.create(
-            model=model,
-            max_tokens=2048,
-            system="You are an English learning assistant helping intermediate learners understand English articles. Always respond in valid JSON format.",
-            messages=[{
-                "role": "user",
-                "content": f"""Analyze this paragraph and create learning content in JSON format:
+    # Truncate paragraph if too long
+    paragraph = request.paragraph
+    if len(paragraph) > 2000:
+        paragraph = paragraph[:2000] + "..."
+    
+    max_retries = 2
+    last_error = None
+    
+    for attempt in range(max_retries + 1):
+        try:
+            message = client.messages.create(
+                model=model,
+                max_tokens=2500,  # Increased to avoid truncation
+                system="You are an English learning assistant. You MUST respond with valid JSON only. No markdown, no explanations, just the JSON object.",
+                messages=[{
+                    "role": "user",
+                    "content": f"""Create learning content for this English paragraph. Return ONLY a valid JSON object.
 
 Paragraph:
-{request.paragraph}
+{paragraph}
 
-Create a JSON response with exactly this structure:
-{{
-  "translation": "中文翻譯 (translate the paragraph to Traditional Chinese)",
-  "simpleSummary": "A simple English summary using basic vocabulary (2-3 sentences)",
-  "simpleSummaryTranslation": "簡單英文總結的中文翻譯",
-  "questions": [
-    {{
-      "question": "Discussion question in English",
-      "questionTranslation": "問題的中文翻譯",
-      "answer": "Sample answer in English (2-3 sentences)",
-      "answerTranslation": "答案的中文翻譯"
-    }},
-    {{
-      "question": "Second question in English",
-      "questionTranslation": "第二個問題的中文翻譯",
-      "answer": "Sample answer in English",
-      "answerTranslation": "答案的中文翻譯"
-    }},
-    {{
-      "question": "Third question in English",
-      "questionTranslation": "第三個問題的中文翻譯",
-      "answer": "Sample answer in English",
-      "answerTranslation": "答案的中文翻譯"
-    }}
-  ]
-}}
+Return this exact JSON structure (fill in the values):
+{{"translation": "繁體中文翻譯", "simpleSummary": "Simple 2-3 sentence summary in easy English", "simpleSummaryTranslation": "簡單總結的中文翻譯", "questions": [{{"question": "First discussion question?", "questionTranslation": "第一個問題的中文", "answer": "Sample answer in English.", "answerTranslation": "答案的中文翻譯"}}, {{"question": "Second discussion question?", "questionTranslation": "第二個問題的中文", "answer": "Sample answer.", "answerTranslation": "答案中文"}}, {{"question": "Third discussion question?", "questionTranslation": "第三個問題的中文", "answer": "Sample answer.", "answerTranslation": "答案中文"}}]}}
 
-Important:
-- Use simple, clear English for the summary and questions
-- Questions should encourage discussion and thinking
-- Provide helpful sample answers that use vocabulary from the paragraph
-- All translations should be in Traditional Chinese
-- Return ONLY valid JSON, no markdown formatting"""
-            }]
-        )
-        
-        # Parse JSON response
-        response_text = message.content[0].text.strip()
-        
-        # Remove markdown code blocks if present
-        if response_text.startswith('```'):
-            response_text = re.sub(r'^```json?\n?', '', response_text)
-            response_text = re.sub(r'```\n?$', '', response_text)
-        
-        content = json.loads(response_text)
-        
-        return {
-            "index": request.index,
-            "original": request.paragraph,
-            **content
-        }
-        
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse AI response: {str(e)}")
-    except anthropic.APIError as e:
-        raise HTTPException(status_code=500, detail=f"Claude API error: {str(e)}")
+IMPORTANT: Return ONLY the JSON object, nothing else."""
+                }]
+            )
+            
+            # Parse JSON response with fallback strategies
+            response_text = message.content[0].text.strip()
+            content = parse_json_safely(response_text)
+            
+            # Validate required fields exist
+            required_fields = ['translation', 'simpleSummary', 'simpleSummaryTranslation', 'questions']
+            for field in required_fields:
+                if field not in content:
+                    raise ValueError(f"Missing required field: {field}")
+            
+            if len(content['questions']) < 3:
+                raise ValueError("Not enough questions generated")
+            
+            return {
+                "index": request.index,
+                "original": request.paragraph,
+                **content
+            }
+            
+        except (json.JSONDecodeError, ValueError) as e:
+            last_error = e
+            if attempt < max_retries:
+                print(f"Retry {attempt + 1} for paragraph {request.index}: {str(e)}")
+                continue
+        except anthropic.APIError as e:
+            raise HTTPException(status_code=500, detail=f"Claude API error: {str(e)}")
+    
+    # All retries failed, return a fallback response
+    print(f"All retries failed for paragraph {request.index}, using fallback")
+    return {
+        "index": request.index,
+        "original": request.paragraph,
+        "translation": "[翻譯生成失敗，請重試]",
+        "simpleSummary": "This paragraph discusses the topic mentioned above.",
+        "simpleSummaryTranslation": "[總結生成失敗]",
+        "questions": [
+            {
+                "question": "What is the main idea of this paragraph?",
+                "questionTranslation": "這段的主要內容是什麼？",
+                "answer": "The main idea is discussed in the paragraph above.",
+                "answerTranslation": "主要內容在上面的段落中討論。"
+            },
+            {
+                "question": "What details support the main idea?",
+                "questionTranslation": "有哪些細節支持主要觀點？",
+                "answer": "The paragraph provides several supporting details.",
+                "answerTranslation": "段落提供了幾個支持的細節。"
+            },
+            {
+                "question": "How does this relate to the overall topic?",
+                "questionTranslation": "這與整體主題有什麼關係？",
+                "answer": "This paragraph contributes to the overall discussion.",
+                "answerTranslation": "這段對整體討論有所貢獻。"
+            }
+        ]
+    }
 
 
 @router.post("/process-article", response_model=ProcessArticleResponse)
